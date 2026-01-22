@@ -2,73 +2,106 @@ import streamlit as st
 from openai import OpenAI
 import os
 
-# 1. 頁面基礎設定
-st.set_page_config(page_title="LinguaFlow AI", page_icon="🎓")
-st.title("LinguaFlow AI: Adaptive English Tutor")
-st.markdown("Your personal AI tutor. Just type/speak to start!")
+st.set_page_config(page_title="LinguaFlow AI", page_icon="🗣️")
+st.title("LinguaFlow AI: Any Topic English Tutor")
 
-# 2. 自動獲取 API Key (從 Secrets)
-# 這裡會嘗試從 Streamlit Secrets 讀取，如果沒有設定，則會報錯提示
+# --- 1. API Key 設定 (保持不變) ---
 try:
     api_key = st.secrets["OPENAI_API_KEY"]
 except FileNotFoundError:
-    st.error("請老師在 Streamlit 後台設定 Secrets: OPENAI_API_KEY")
+    st.error("請在 Streamlit 後台設定 Secrets: OPENAI_API_KEY")
     st.stop()
 
-# 3. 側邊欄：只保留場景設定 (不再顯示 Key 輸入框)
+# --- 2. 側邊欄：強化的主題選擇功能 ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("⚙️ 設定 (Settings)")
     
-    user_level = st.selectbox("Your Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
-    scenario = st.selectbox("Choose Scenario", [
-        "Ordering Coffee", 
-        "Job Interview", 
-        "Making Friends", 
-        "Travel Help"
-    ])
+    user_level = st.selectbox("你的英文程度", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
     
-    if st.button("Restart Conversation"):
+    st.divider()
+    
+    # [修改重點 A]：增加模式選擇
+    mode = st.radio(
+        "選擇練習模式 (Choose Mode)",
+        ["預設場景 (Presets)", "自訂主題 (Custom Topic)", "自由對話 (Free Chat)"]
+    )
+    
+    final_scenario = "" # 這是我們要傳給 AI 的最終主題
+    
+    if mode == "預設場景 (Presets)":
+        # 顯示原本的選單
+        selected_preset = st.selectbox("選擇場景", [
+            "Ordering Coffee", 
+            "Job Interview", 
+            "Making Friends", 
+            "Travel Help",
+            "Debating AI Ethics"
+        ])
+        final_scenario = selected_preset
+        
+    elif mode == "自訂主題 (Custom Topic)":
+        # [修改重點 B]：顯示文字輸入框讓學生自己打
+        custom_topic = st.text_input("輸入你想聊的主題 (例如: Harry Potter, Basketball...)", "My favorite movie")
+        final_scenario = custom_topic
+        
+    else: # 自由對話
+        final_scenario = "Free Conversation (No specific topic, just chat naturally)"
+    
+    st.info(f"當前模式: **{final_scenario}**")
+    
+    if st.button("重新開始 (Restart)"):
         st.session_state.messages = []
         st.rerun()
 
-# 4. 初始化記憶體
+# --- 3. 初始化 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # AI 先發制人，主動打招呼
-    welcome_msg = f"Hi! I am ready to help you practice '{scenario}'. I'll adjust to your {user_level} level."
-    st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
+    
+    # 根據不同模式，AI 的第一句話要有變化
+    if mode == "自由對話 (Free Chat)":
+        greeting = f"Hi! I'm your English tutor. We can talk about anything. How is your day?"
+    else:
+        greeting = f"Hi! I'm ready to practice '{final_scenario}' with you. I'll adjust to {user_level} level."
+        
+    st.session_state.messages.append({"role": "assistant", "content": greeting})
 
-# 5. 顯示歷史對話
+# --- 4. 顯示對話 ---
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 6. 處理用戶輸入
+# --- 5. 處理輸入與 Prompt ---
 if user_input := st.chat_input("Type here..."):
 
-    # 顯示用戶訊息
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 準備 Prompt
+    # [修改重點 C]：根據模式調整 Prompt
+    # 這裡的邏輯告訴 AI：如果是自由對話，就不要扮演特定角色，而是當一個朋友
+    role_instruction = ""
+    if mode == "自由對話 (Free Chat)":
+        role_instruction = "You are a friendly casual chat partner. Discuss whatever the user wants."
+    else:
+        role_instruction = f"Roleplay scenario: {final_scenario}. Stay in character."
+
     system_prompt = f"""
-    You are an English Tutor. 
-    Level: {user_level}. Scenario: {scenario}.
-    Rules: 
-    - Keep answers short (1-2 sentences).
-    - If user makes a grammar mistake, correct it gently inside the reply.
+    You are an Adaptive English Tutor.
+    Current User Level: {user_level}
+    {role_instruction}
+    
+    Key Rules:
+    1. If user makes mistakes -> Gently correct them (Implicit Recasting).
+    2. Keep responses concise (1-3 sentences) to encourage conversation.
+    3. If the user changes the topic, follow them naturally.
     """
 
-    # 呼叫 AI
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
         
         try:
-            # 直接使用從 Secrets 拿到的 Key
             client = OpenAI(api_key=api_key)
-            
             stream = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "system", "content": system_prompt}] + st.session_state.messages,
@@ -84,6 +117,5 @@ if user_input := st.chat_input("Type here..."):
         
         except Exception as e:
             st.error(f"Error: {e}")
-            full_response = "Sorry, connection error."
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})
