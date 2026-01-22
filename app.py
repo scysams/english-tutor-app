@@ -1,86 +1,77 @@
 import streamlit as st
 from openai import OpenAI
+import os
 
 # 1. 頁面基礎設定
 st.set_page_config(page_title="LinguaFlow AI", page_icon="🎓")
-
 st.title("LinguaFlow AI: Adaptive English Tutor")
-st.markdown("Your personal AI tutor that adapts to your speaking level.")
+st.markdown("Your personal AI tutor. Just type/speak to start!")
 
-# 2. 側邊欄：設定與 API Key
+# 2. 自動獲取 API Key (從 Secrets)
+# 這裡會嘗試從 Streamlit Secrets 讀取，如果沒有設定，則會報錯提示
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+except FileNotFoundError:
+    st.error("請老師在 Streamlit 後台設定 Secrets: OPENAI_API_KEY")
+    st.stop()
+
+# 3. 側邊欄：只保留場景設定 (不再顯示 Key 輸入框)
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # 這是最簡單的 API Key 處理方式：讓用戶自己輸入
-    # 如果是你自己用，這很安全，因為 Streamlit 不會儲存它
-    api_key = st.text_input("Enter OpenAI API Key", type="password")
-    
-    st.divider()
-    
-    # 選擇難度與場景
-    user_level = st.selectbox("Your Current Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
+    user_level = st.selectbox("Your Level", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
     scenario = st.selectbox("Choose Scenario", [
         "Ordering Coffee", 
         "Job Interview", 
-        "Making Friends at a Party", 
-        "Checking into a Hotel",
-        "Debating AI Ethics"
+        "Making Friends", 
+        "Travel Help"
     ])
     
-    st.info(f"Current Mode: **{scenario}**")
-    
-    if st.button("Clear Chat / Restart"):
+    if st.button("Restart Conversation"):
         st.session_state.messages = []
         st.rerun()
 
-# 3. 初始化 Session State (記憶體)
+# 4. 初始化記憶體
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    # AI 先發制人，主動打招呼
+    welcome_msg = f"Hi! I am ready to help you practice '{scenario}'. I'll adjust to your {user_level} level."
+    st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
 
-# 4. 顯示歷史對話
+# 5. 顯示歷史對話
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 5. 處理用戶輸入
-if user_input := st.chat_input("Type your response here..."):
-    
-    if not api_key:
-        st.warning("⚠️ Please enter your OpenAI API Key in the sidebar to start.")
-        st.stop()
+# 6. 處理用戶輸入
+if user_input := st.chat_input("Type here..."):
 
-    # 顯示用戶的訊息
+    # 顯示用戶訊息
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 6. 建構 System Prompt (核心教學邏輯)
+    # 準備 Prompt
     system_prompt = f"""
-    Role: Adaptive English Tutor.
-    Current User Level: {user_level}
-    Scenario: {scenario}
-
-    Logic:
-    1. If user makes mistakes -> Gently correct (Implicit Recasting) and lower difficulty.
-    2. If user is fluent -> Increase difficulty, use idioms, ask 'Why'.
-    3. Keep responses concise (1-3 sentences).
-    4. Stay in character as a partner in the scenario.
+    You are an English Tutor. 
+    Level: {user_level}. Scenario: {scenario}.
+    Rules: 
+    - Keep answers short (1-2 sentences).
+    - If user makes a grammar mistake, correct it gently inside the reply.
     """
 
-    # 準備發送給 OpenAI 的訊息列表
-    # 我們把 system prompt 放在最前面，然後接上歷史對話
-    full_messages = [{"role": "system", "content": system_prompt}] + st.session_state.messages
-
-    # 7. 呼叫 AI (串流顯示效果)
+    # 呼叫 AI
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
         
         try:
+            # 直接使用從 Secrets 拿到的 Key
             client = OpenAI(api_key=api_key)
+            
             stream = client.chat.completions.create(
-                model="gpt-4o", # 建議使用 gpt-4o 或 gpt-3.5-turbo
-                messages=full_messages,
+                model="gpt-4o",
+                messages=[{"role": "system", "content": system_prompt}] + st.session_state.messages,
                 stream=True,
             )
             
@@ -93,7 +84,6 @@ if user_input := st.chat_input("Type your response here..."):
         
         except Exception as e:
             st.error(f"Error: {e}")
-            full_response = "Sorry, I encountered an error. Please check your API Key."
+            full_response = "Sorry, connection error."
 
-    # 記錄 AI 的回應
     st.session_state.messages.append({"role": "assistant", "content": full_response})
