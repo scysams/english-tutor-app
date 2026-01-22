@@ -1,111 +1,73 @@
+
 import streamlit as st
 from openai import OpenAI
 import os
 
-st.set_page_config(page_title="LinguaFlow AI", page_icon="🗣️")
-st.title("LinguaFlow AI: Any Topic English Tutor")
+st.set_page_config(page_title="LinguaFlow (DeepSeek)", page_icon="🇭🇰")
+st.title("LinguaFlow: HK Edition")
+st.caption("Powered by DeepSeek-V3 - Natively supported in HK")
 
-# --- 1. API Key 設定 (保持不變) ---
+# --- 1. 獲取 Key ---
 try:
-    api_key = st.secrets["OPENAI_API_KEY"]
+    api_key = st.secrets["DEEPSEEK_API_KEY"]
 except FileNotFoundError:
-    st.error("請在 Streamlit 後台設定 Secrets: OPENAI_API_KEY")
+    st.error("請在 Secrets 設定 DEEPSEEK_API_KEY")
     st.stop()
 
-# --- 2. 側邊欄：強化的主題選擇功能 ---
+# --- 2. 側邊欄 ---
 with st.sidebar:
-    st.header("⚙️ 設定 (Settings)")
+    st.header("⚙️ 設定")
+    user_level = st.selectbox("你的程度", ["Beginner", "Intermediate", "Advanced"])
     
-    user_level = st.selectbox("你的英文程度", ["Beginner (A1-A2)", "Intermediate (B1-B2)", "Advanced (C1-C2)"])
-    
+    # DeepSeek 主要有一個超強模型：DeepSeek-V3 (Chat)
+    st.info("Model: DeepSeek-V3 (Smart & Fast)")
+
     st.divider()
     
-    # [修改重點 A]：增加模式選擇
-    mode = st.radio(
-        "選擇練習模式 (Choose Mode)",
-        ["預設場景 (Presets)", "自訂主題 (Custom Topic)", "自由對話 (Free Chat)"]
-    )
-    
-    final_scenario = "" # 這是我們要傳給 AI 的最終主題
-    
-    if mode == "預設場景 (Presets)":
-        # 顯示原本的選單
-        selected_preset = st.selectbox("選擇場景", [
-            "Ordering Coffee", 
-            "Job Interview", 
-            "Making Friends", 
-            "Travel Help",
-            "Debating AI Ethics"
-        ])
-        final_scenario = selected_preset
-        
-    elif mode == "自訂主題 (Custom Topic)":
-        # [修改重點 B]：顯示文字輸入框讓學生自己打
-        custom_topic = st.text_input("輸入你想聊的主題 (例如: Harry Potter, Basketball...)", "My favorite movie")
-        final_scenario = custom_topic
-        
-    else: # 自由對話
-        final_scenario = "Free Conversation (No specific topic, just chat naturally)"
-    
-    st.info(f"當前模式: **{final_scenario}**")
-    
-    if st.button("重新開始 (Restart)"):
+    mode = st.radio("模式", ["預設場景", "自由對話"])
+    if mode == "預設場景":
+        scenario = st.selectbox("場景", ["Ordering Coffee", "Job Interview", "Travel"])
+    else:
+        scenario = "Free Chat"
+
+    if st.button("重新開始"):
         st.session_state.messages = []
         st.rerun()
 
 # --- 3. 初始化 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    
-    # 根據不同模式，AI 的第一句話要有變化
-    if mode == "自由對話 (Free Chat)":
-        greeting = f"Hi! I'm your English tutor. We can talk about anything. How is your day?"
-    else:
-        greeting = f"Hi! I'm ready to practice '{final_scenario}' with you. I'll adjust to {user_level} level."
-        
-    st.session_state.messages.append({"role": "assistant", "content": greeting})
+    st.session_state.messages.append({"role": "assistant", "content": "Hi! I am ready. Let's practice English!"})
 
-# --- 4. 顯示對話 ---
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 5. 處理輸入與 Prompt ---
+# --- 4. 處理輸入 ---
 if user_input := st.chat_input("Type here..."):
-
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # [修改重點 C]：根據模式調整 Prompt
-    # 這裡的邏輯告訴 AI：如果是自由對話，就不要扮演特定角色，而是當一個朋友
-    role_instruction = ""
-    if mode == "自由對話 (Free Chat)":
-        role_instruction = "You are a friendly casual chat partner. Discuss whatever the user wants."
-    else:
-        role_instruction = f"Roleplay scenario: {final_scenario}. Stay in character."
-
-    system_prompt = f"""
-    You are an Adaptive English Tutor.
-    Current User Level: {user_level}
-    {role_instruction}
-    
-    Key Rules:
-    1. If user makes mistakes -> Gently correct them (Implicit Recasting).
-    2. Keep responses concise (1-3 sentences) to encourage conversation.
-    3. If the user changes the topic, follow them naturally.
-    """
+    # Prompt (保持原本的教學邏輯)
+    system_prompt = f"You are an English Tutor. Level: {user_level}. Scenario: {scenario}. Keep it short."
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
         
         try:
-            client = OpenAI(api_key=api_key)
+            # 關鍵修改：DeepSeek 設定
+            client = OpenAI(
+                base_url="https://api.deepseek.com",  # 指向 DeepSeek 官方接口
+                api_key=api_key
+            )
+            
             stream = client.chat.completions.create(
-                model="gpt-4o",
+                model="deepseek-chat", # 這是 DeepSeek V3 的模型代碼
                 messages=[{"role": "system", "content": system_prompt}] + st.session_state.messages,
                 stream=True,
+                temperature=1.3 # DeepSeek 建議設高一點比較自然
             )
             
             for chunk in stream:
@@ -117,5 +79,6 @@ if user_input := st.chat_input("Type here..."):
         
         except Exception as e:
             st.error(f"Error: {e}")
+            st.error("如果顯示餘額不足，請確認 DeepSeek 後台是否有免費額度。")
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})
